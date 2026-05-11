@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://img.shields.io/badge/version-2.0-blue?style=flat-square" alt="version"/>
+<img src="https://img.shields.io/badge/version-1.0-blue?style=flat-square" alt="version"/>
 
 # 📡 TELEGRAM MIRROR
 
