@@ -46,14 +46,7 @@ def parse_message(el):
     else:
         msg["text"] = ""
 
-    photo_el = el.select_one(".tgme_widget_message_photo_wrap")
-    if photo_el:
-        style = photo_el.get("style", "")
-        m = re.search(r"url\('(.+?)'\)", style)
-        msg["photo"] = m.group(1) if m else ""
-    else:
-        msg["photo"] = ""
-
+    # Album (multiple photos)
     album_photos = el.select(".tgme_widget_message_photo_wrap")
     msg["album"] = []
     for ph in album_photos:
@@ -62,22 +55,57 @@ def parse_message(el):
         if m:
             msg["album"].append(m.group(1))
 
+    # Single photo
+    photo_el = el.select_one(".tgme_widget_message_photo_wrap")
+    if photo_el:
+        style = photo_el.get("style", "")
+        m = re.search(r"url\('(.+?)'\)", style)
+        msg["photo"] = m.group(1) if m else ""
+    else:
+        msg["photo"] = ""
+
+    # Video
     video_el = el.select_one("video")
     msg["video"] = video_el.get("src", "") if video_el else ""
 
+    # Video thumbnail
+    if video_el:
+        thumb = el.select_one(".tgme_widget_message_video_thumb")
+        if thumb:
+            style = thumb.get("style", "")
+            m = re.search(r"url\('(.+?)'\)", style)
+            msg["video_thumb"] = m.group(1) if m else ""
+        else:
+            msg["video_thumb"] = ""
+        duration_el = el.select_one(".tgme_widget_message_video_duration")
+        msg["video_duration"] = duration_el.get_text(strip=True) if duration_el else ""
+    else:
+        msg["video_thumb"] = ""
+        msg["video_duration"] = ""
+
+    # Document
     doc_el = el.select_one(".tgme_widget_message_document")
     if doc_el:
         title_el = doc_el.select_one(".tgme_widget_message_document_title")
         extra_el = doc_el.select_one(".tgme_widget_message_document_extra")
         msg["doc_title"] = title_el.get_text(strip=True) if title_el else ""
         msg["doc_extra"] = extra_el.get_text(strip=True) if extra_el else ""
+        link_wrap = el.select_one("a.tgme_widget_message_document_wrap, a[href*='tg_file']")
+        msg["doc_url"] = link_wrap.get("href", "") if link_wrap else ""
     else:
         msg["doc_title"] = ""
         msg["doc_extra"] = ""
+        msg["doc_url"] = ""
 
+    # Audio
+    audio_el = el.select_one("audio")
+    msg["audio_url"] = audio_el.get("src", "") if audio_el else ""
+
+    # Forwarded
     fwd_el = el.select_one(".tgme_widget_message_forwarded_from")
     msg["forwarded_from"] = fwd_el.get_text(strip=True) if fwd_el else ""
 
+    # Poll
     poll_el = el.select_one(".tgme_widget_message_poll")
     if poll_el:
         q = poll_el.select_one(".tgme_widget_message_poll_question")
@@ -87,6 +115,17 @@ def parse_message(el):
     else:
         msg["poll_question"] = ""
         msg["poll_options"] = []
+
+    # Reactions
+    reactions = []
+    for r in el.select(".tgme_widget_message_reaction"):
+        emoji_el = r.select_one(".tgme_widget_message_reaction_emoji")
+        count_el = r.select_one(".tgme_widget_message_reaction_count")
+        if emoji_el:
+            emoji = emoji_el.get_text(strip=True)
+            count = count_el.get_text(strip=True) if count_el else ""
+            reactions.append(f"{emoji} {count}".strip())
+    msg["reactions"] = reactions
 
     msg_url_el = el.select_one(".tgme_widget_message_date")
     msg["url"] = msg_url_el.get("href", "") if msg_url_el else ""
@@ -171,6 +210,119 @@ def fetch_channel(channel, count):
     return messages, channel_info
 
 
+def escape_md(text):
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def download_box(post_url: str, label: str, extra: str = "") -> list:
+    """
+    یه باکس دانلود می‌سازه با لینک پست داخل code block
+    تا کاربر بتونه با یه کلیک کپی کنه و بره داخل اکشن paste کنه
+    """
+    lines = []
+    lines.append('<table><tr><td>')
+    lines.append(f'<b>⬇️ {label}</b>')
+    if extra:
+        lines.append(f'<br/><sub>{extra}</sub>')
+    lines.append('<br/>')
+    lines.append('<sub>📋 لینک پست را کپی کن، سپس برو <b>Actions → ⬇️ Download Telegram Post</b> و paste کن:</sub>')
+    lines.append('</td></tr>')
+    lines.append('<tr><td>')
+    lines.append(f'```\n{post_url}\n```')
+    lines.append('</td></tr></table>')
+    lines.append('')
+    return lines
+
+
+def render_message_md(m):
+    lines = []
+
+    lines.append('<table width="100%">')
+    lines.append('<tr><td width="100%">')
+    lines.append("")
+
+    # ── فوروارد ──
+    if m.get("forwarded_from"):
+        lines.append(f"> ↪ **فوروارد از:** {escape_md(m['forwarded_from'])}")
+        lines.append("")
+
+    # ── آلبوم ──
+    if m.get("album") and len(m["album"]) > 1:
+        for ph in m["album"]:
+            lines.append(f'<a href="{ph}"><img src="{ph}" width="400"/></a>')
+            lines.append("<br/>")
+        lines.append("")
+    elif m.get("photo"):
+        ph = m["photo"]
+        lines.append(f'<a href="{ph}"><img src="{ph}" width="400"/></a>')
+        lines.append("")
+
+    # ── ویدیو ──
+    if m.get("video"):
+        thumb = m.get("video_thumb", "")
+        duration = m.get("video_duration", "")
+        post_url = m.get("url", "")
+
+        if thumb:
+            lines.append(f'<a href="{thumb}"><img src="{thumb}" width="400"/></a><br/>')
+            lines.append("")
+
+        extra = f"🕐 {duration}" if duration else ""
+        lines.extend(download_box(post_url, "دانلود ویدیو", extra))
+
+    # ── صدا ──
+    if m.get("audio_url"):
+        post_url = m.get("url", "")
+        lines.extend(download_box(post_url, "دانلود فایل صوتی"))
+
+    # ── فایل/سند ──
+    if m.get("doc_title"):
+        post_url = m.get("url", "")
+        doc_title = escape_md(m["doc_title"])
+        doc_extra = escape_md(m.get("doc_extra", ""))
+        lines.extend(download_box(post_url, f"دانلود سند — {doc_title}", doc_extra))
+
+    # ── نظرسنجی ──
+    if m.get("poll_question"):
+        lines.append(f'📊 **{escape_md(m["poll_question"])}**')
+        lines.append("")
+        for opt in m.get("poll_options", []):
+            lines.append(f"▫️ {escape_md(opt)}")
+        lines.append("")
+
+    # ── متن ──
+    if m.get("text"):
+        text = escape_md(m["text"])
+        lines_text = text.split("\n")
+        wrapped = "<br/>".join(lines_text)
+        lines.append(wrapped)
+        lines.append("")
+
+    # ── ری‌اکشن‌ها ──
+    if m.get("reactions"):
+        lines.append("&nbsp;&nbsp;".join(m["reactions"]))
+        lines.append("")
+
+    # ── فوتر ──
+    footer_parts = []
+    if m.get("views"):
+        footer_parts.append(f"👁 **{m['views']}**")
+    if m.get("date") and m.get("url"):
+        footer_parts.append(f'[🕐 {m["date"]}]({m["url"]})')
+    elif m.get("date"):
+        footer_parts.append(f'🕐 {m["date"]}')
+
+    if footer_parts:
+        lines.append("<sub>" + " &nbsp;·&nbsp; ".join(footer_parts) + "</sub>")
+
+    lines.append("")
+    lines.append("</td></tr>")
+    lines.append("</table>")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
 def render_markdown(messages, channel_info, channel, fetch_time):
     lines = []
 
@@ -179,71 +331,43 @@ def render_markdown(messages, channel_info, channel, fetch_time):
     desc = channel_info.get("description", "")
     avatar = channel_info.get("avatar", "")
 
-    # Header
-    lines.append(f"<div align=\"center\">")
+    lines.append('<div align="center">')
+    lines.append("")
     if avatar:
-        lines.append(f"\n<img src=\"{avatar}\" width=\"80\" height=\"80\" style=\"border-radius:50%\"/>\n")
-    lines.append(f"\n# 📡 {title}\n")
-    lines.append(f"**@{channel}**")
+        lines.append(f'<img src="{avatar}" width="80" height="80"/>')
+        lines.append("")
+    lines.append(f"# 📡 {escape_md(title)}")
+    lines.append("")
+
+    meta = [f"**@{channel}**"]
     if members:
-        lines.append(f" · 👥 {members} عضو")
-    lines.append(f"\n\n")
+        meta.append(f"👥 **{members}** عضو")
+    lines.append(" &nbsp;·&nbsp; ".join(meta))
+    lines.append("")
+
     if desc:
-        lines.append(f"*{desc}*\n\n")
-    lines.append(f"🕐 آپدیت: `{fetch_time}` · 📨 {len(messages)} پیام\n")
-    lines.append(f"\n[![باز کردن در تلگرام](https://img.shields.io/badge/باز_کردن_در_تلگرام-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/{channel})\n")
-    lines.append(f"\n</div>\n\n")
-    lines.append("---\n\n")
+        lines.append(f"*{escape_md(desc)}*")
+        lines.append("")
 
-    # Messages (newest last)
+    lines.append(f"🕐 آپدیت: `{fetch_time}` &nbsp;·&nbsp; 📨 **{len(messages)}** پیام")
+    lines.append("")
+    lines.append(f'[![باز در تلگرام](https://img.shields.io/badge/باز_کردن_در_تلگرام-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/{channel})')
+    lines.append("")
+    lines.append("</div>")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+
     for m in messages:
-        # Forwarded
-        if m.get("forwarded_from"):
-            lines.append(f"> ↪ **فوروارد از:** {m['forwarded_from']}\n\n")
+        lines.append(render_message_md(m))
 
-        # Album (multiple photos)
-        if m.get("album") and len(m["album"]) > 1:
-            for i, ph in enumerate(m["album"]):
-                lines.append(f"[![photo {i+1}]({ph})]({ph})\n")
-            lines.append("\n")
-        elif m.get("photo"):
-            lines.append(f"[![photo]({m['photo']})]({m['photo']})\n\n")
+    lines.append("---")
+    lines.append("")
+    lines.append('<div align="center">')
+    lines.append(f"<sub>ساخته شده با ❤️ توسط TG Mirror &nbsp;·&nbsp; {fetch_time}</sub>")
+    lines.append("</div>")
 
-        # Video
-        if m.get("video"):
-            lines.append(f"🎬 **[دانلود ویدیو]({m['video']})**\n\n")
-
-        # Document
-        if m.get("doc_title"):
-            lines.append(f"📄 **{m['doc_title']}** `{m['doc_extra']}`\n\n")
-
-        # Poll
-        if m.get("poll_question"):
-            lines.append(f"📊 **{m['poll_question']}**\n\n")
-            for opt in m.get("poll_options", []):
-                lines.append(f"- {opt}\n")
-            lines.append("\n")
-
-        # Text
-        if m.get("text"):
-            text = m["text"]
-            lines.append(f"{text}\n\n")
-
-        # Footer
-        footer_parts = []
-        if m.get("views"):
-            footer_parts.append(f"👁 {m['views']}")
-        if m.get("date") and m.get("url"):
-            footer_parts.append(f"[{m['date']}]({m['url']})")
-        elif m.get("date"):
-            footer_parts.append(m["date"])
-
-        if footer_parts:
-            lines.append(f"<sub>{' · '.join(footer_parts)}</sub>\n\n")
-
-        lines.append("---\n\n")
-
-    return "".join(lines)
+    return "\n".join(lines)
 
 
 def main():
@@ -276,14 +400,13 @@ def main():
         out_dir = Path("channels")
         try:
             out_dir.mkdir(parents=True, exist_ok=True)
-            print(f"[+] Created directory: {out_dir}")
         except Exception as e:
             print(f"[!] Error creating directory: {e}")
             sys.exit(1)
 
         filename = f"{channel}_{file_date}.md"
         out_file = out_dir / filename
-        
+
         try:
             out_file.write_text(md, encoding="utf-8")
             file_size = out_file.stat().st_size
