@@ -97,6 +97,10 @@ def parse_message(el):
         msg["doc_extra"] = ""
         msg["doc_url"] = ""
 
+    # Audio
+    audio_el = el.select_one("audio")
+    msg["audio_url"] = audio_el.get("src", "") if audio_el else ""
+
     # Forwarded
     fwd_el = el.select_one(".tgme_widget_message_forwarded_from")
     msg["forwarded_from"] = fwd_el.get_text(strip=True) if fwd_el else ""
@@ -210,12 +214,29 @@ def escape_md(text):
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+def download_box(post_url: str, label: str, extra: str = "") -> list:
+    """
+    یه باکس دانلود می‌سازه با لینک پست داخل code block
+    تا کاربر بتونه با یه کلیک کپی کنه و بره داخل اکشن paste کنه
+    """
+    lines = []
+    lines.append('<table><tr><td>')
+    lines.append(f'<b>⬇️ {label}</b>')
+    if extra:
+        lines.append(f'<br/><sub>{extra}</sub>')
+    lines.append('<br/>')
+    lines.append('<sub>📋 لینک پست را کپی کن، سپس برو <b>Actions → ⬇️ Download Telegram Post</b> و paste کن:</sub>')
+    lines.append('</td></tr>')
+    lines.append('<tr><td>')
+    lines.append(f'```\n{post_url}\n```')
+    lines.append('</td></tr></table>')
+    lines.append('')
+    return lines
+
+
 def render_message_md(m):
-    """هر پیام رو به صورت یه کارت جداگانه با table رندر می‌کنه"""
     lines = []
 
-    # ── کارت اصلی با min-width برای جلوگیری از اسکرول افقی ──
-    # گیتهاب style رو حذف می‌کنه ولی width=100% روی td کمک می‌کنه
     lines.append('<table width="100%">')
     lines.append('<tr><td width="100%">')
     lines.append("")
@@ -225,68 +246,41 @@ def render_message_md(m):
         lines.append(f"> ↪ **فوروارد از:** {escape_md(m['forwarded_from'])}")
         lines.append("")
 
-    # ── آلبوم — عکس‌ها زیر هم (نه کنار هم) برای موبایل ──
+    # ── آلبوم ──
     if m.get("album") and len(m["album"]) > 1:
         for ph in m["album"]:
             lines.append(f'<a href="{ph}"><img src="{ph}" width="400"/></a>')
             lines.append("<br/>")
         lines.append("")
-    # ── عکس تکی ──
     elif m.get("photo"):
         ph = m["photo"]
         lines.append(f'<a href="{ph}"><img src="{ph}" width="400"/></a>')
         lines.append("")
 
-    # ── ویدیو — thumbnail با آیکون پخش روی آن ──
+    # ── ویدیو ──
     if m.get("video"):
         thumb = m.get("video_thumb", "")
         duration = m.get("video_duration", "")
-        vid_url = m["video"]
+        post_url = m.get("url", "")
 
         if thumb:
-            # آیکون پخش روی thumbnail با SVG badge
-            play_icon = "https://img.shields.io/badge/%E2%96%B6%EF%B8%8F_Play-000000AA?style=for-the-badge&logoColor=white"
-            lines.append(f'<a href="{vid_url}"><img src="{thumb}" width="400"/></a><br/>')
-            lines.append(f'<a href="{vid_url}"><img src="{play_icon}" height="28"/></a>')
-            lines.append("")
-        else:
-            lines.append(f'🎬 <a href="{vid_url}"><b>▶ پخش / دانلود ویدیو</b></a>')
+            lines.append(f'<a href="{thumb}"><img src="{thumb}" width="400"/></a><br/>')
             lines.append("")
 
-        # ردیف اطلاعات ویدیو
-        lines.append('<table><tr>')
-        lines.append('<td width="64">')
-        lines.append(f'<a href="{vid_url}"><img src="https://img.shields.io/badge/%E2%AC%87-2CA5E0?style=flat-square&logoColor=white" width="56" height="56"/></a>')
-        lines.append('</td><td>')
-        dur_text = f"<br/><sub>🕐 {duration}</sub>" if duration else ""
-        lines.append(f'<b><a href="{vid_url}">⬇ دانلود ویدیو</a></b>{dur_text}')
-        lines.append('</td></tr></table>')
-        lines.append("")
+        extra = f"🕐 {duration}" if duration else ""
+        lines.extend(download_box(post_url, "دانلود ویدیو", extra))
 
-    # ── فایل/سند — دیزاین شبیه تلگرام ──
+    # ── صدا ──
+    if m.get("audio_url"):
+        post_url = m.get("url", "")
+        lines.extend(download_box(post_url, "دانلود فایل صوتی"))
+
+    # ── فایل/سند ──
     if m.get("doc_title"):
-        doc_url = m.get("doc_url", "")
+        post_url = m.get("url", "")
         doc_title = escape_md(m["doc_title"])
         doc_extra = escape_md(m.get("doc_extra", ""))
-
-        lines.append('<table><tr>')
-        lines.append('<td width="64">')
-        # آیکون دانلود بزرگ‌تر (56x56)
-        if doc_url:
-            lines.append(f'<a href="{doc_url}"><img src="https://img.shields.io/badge/%E2%AC%87-2CA5E0?style=flat-square&logoColor=white" width="56" height="56"/></a>')
-        else:
-            lines.append('<img src="https://img.shields.io/badge/%E2%AC%87-555555?style=flat-square&logoColor=white" width="56" height="56"/>')
-        lines.append('</td>')
-        lines.append('<td>')
-        if doc_url:
-            lines.append(f'<b><a href="{doc_url}">{doc_title}</a></b>')
-        else:
-            lines.append(f'<b>{doc_title}</b>')
-        if doc_extra:
-            lines.append(f'<br/><sub>{doc_extra}</sub>')
-        lines.append('</td>')
-        lines.append('</tr></table>')
-        lines.append("")
+        lines.extend(download_box(post_url, f"دانلود سند — {doc_title}", doc_extra))
 
     # ── نظرسنجی ──
     if m.get("poll_question"):
@@ -296,10 +290,9 @@ def render_message_md(m):
             lines.append(f"▫️ {escape_md(opt)}")
         lines.append("")
 
-    # ── متن پیام — word-wrap با <br/> ──
+    # ── متن ──
     if m.get("text"):
         text = escape_md(m["text"])
-        # هر خط رو جداگانه با <br/> جدا کن تا اسکرول افقی نداشته باشه
         lines_text = text.split("\n")
         wrapped = "<br/>".join(lines_text)
         lines.append(wrapped)
@@ -338,7 +331,6 @@ def render_markdown(messages, channel_info, channel, fetch_time):
     desc = channel_info.get("description", "")
     avatar = channel_info.get("avatar", "")
 
-    # هدر کانال
     lines.append('<div align="center">')
     lines.append("")
     if avatar:
@@ -366,15 +358,13 @@ def render_markdown(messages, channel_info, channel, fetch_time):
     lines.append("---")
     lines.append("")
 
-    # پیام‌ها
     for m in messages:
         lines.append(render_message_md(m))
 
-    # فوتر صفحه
     lines.append("---")
     lines.append("")
     lines.append('<div align="center">')
-    lines.append(f"<sub>ساخته شده با ❤️ توسط TG Reader &nbsp;·&nbsp; {fetch_time}</sub>")
+    lines.append(f"<sub>ساخته شده با ❤️ توسط TG Mirror &nbsp;·&nbsp; {fetch_time}</sub>")
     lines.append("</div>")
 
     return "\n".join(lines)
@@ -410,7 +400,6 @@ def main():
         out_dir = Path("channels")
         try:
             out_dir.mkdir(parents=True, exist_ok=True)
-            print(f"[+] Created directory: {out_dir}")
         except Exception as e:
             print(f"[!] Error creating directory: {e}")
             sys.exit(1)
