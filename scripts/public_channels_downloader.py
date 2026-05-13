@@ -43,7 +43,6 @@ MIME_TO_EXT = {
     "image/webp":                 ".webp",
     "image/gif":                  ".gif",
     "application/pdf":            ".pdf",
-    "application/npvt":           ".npvt",
     "application/zip":            ".zip",
     "application/x-rar-compressed": ".rar",
     "application/x-7z-compressed":  ".7z",
