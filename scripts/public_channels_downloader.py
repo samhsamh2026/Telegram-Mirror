@@ -9,8 +9,8 @@ from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup
-import shutil
-shutil.rmtree('channels')
+#import shutil
+#shutil.rmtree('channels')
 # ═══════════════════════════════════════════════════════════
 #  ثابت‌ها
 # ═══════════════════════════════════════════════════════════
